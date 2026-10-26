@@ -1,0 +1,5 @@
+/etc/config/zapret2
+/opt/zapret2/config
+/opt/zapret2/files/fake/
+/opt/zapret2/init.d/openwrt/custom.d/
+/opt/zapret2/ipset/

@@ -1,0 +1,186 @@
+/**
+ * zapret2 LuCI styles
+ * Modal window sizes
+ */
+
+/* ui.showModal windows */
+.modal {
+    width: 90%;
+    max-width: 600px;
+}
+
+.modal > div:first-child {
+    width: 100%;
+}
+
+.modal textarea.cbi-input-textarea {
+    width: 100%;
+    font-family: monospace;
+}
+
+/* CBI Modal windows */
+.cbi-modal {
+    width: 90%;
+    max-width: 600px;
+}
+
+.cbi-modal .cbi-modal-dialog,
+.cbi-modal > div:first-child {
+    width: 100%;
+}
+
+.cbi-modal textarea.cbi-input-textarea {
+    width: 100%;
+    font-family: monospace;
+}
+
+/* Settings section: uniform input width */
+.cbi-section > .table input.cbi-input-text {
+    width: 300px;
+}
+
+/* Blockcheck option groups */
+fieldset.bc2-group {
+    border: none;
+    padding: 6px 12px 10px;
+    margin-bottom: 8px;
+}
+
+.bc2-group legend {
+    font-weight: bold;
+    padding: 0 6px;
+    font-size: 90%;
+}
+
+.bc2-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 15px;
+    margin-bottom: 4px;
+}
+
+.bc2-checkbox {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 15px;
+    cursor: pointer;
+}
+
+.bc2-checkbox input[type="checkbox"] {
+    margin-right: 6px;
+    position: relative;
+    top: -1px;
+}
+
+#bc2_curl_path,
+.bc2-field:has(#bc2_curl_path) {
+    flex: 1;
+    width: 100%;
+}
+
+#bc2_scanlevel {
+    margin-left: 11px;
+}
+
+#bc2_repeats {
+    margin-left: 2px;
+}
+
+/* Shared live log viewer */
+.zapret2-log-viewer {
+    box-sizing: border-box;
+    width: 100%;
+    height: 400px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 8px;
+    border: 1px solid #ccc;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border-radius: 3px;
+}
+
+.zapret2-log-line {
+    opacity: 0.85;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Custom script activation editor */
+.zapret2-script-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.zapret2-script-panel {
+    min-width: 0;
+}
+
+.zapret2-script-panel h4 {
+    margin: 0 0 8px;
+}
+
+.zapret2-script-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.zapret2-script-controls .cbi-button {
+    min-width: 84px;
+}
+
+.zapret2-script-control-panel h4 {
+    visibility: hidden;
+}
+
+.zapret2-script-control-table .th,
+.zapret2-script-control-table .td {
+    text-align: center;
+}
+
+.zapret2-script-select {
+    width: 28px;
+    text-align: center;
+}
+
+.zapret2-script-create {
+    margin-top: 16px;
+}
+
+@media screen and (max-width: 700px) {
+    .zapret2-script-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .zapret2-script-controls {
+        align-items: center;
+    }
+
+    .zapret2-script-control-panel h4 {
+        display: none;
+    }
+}
+
+/* Responsive: hide strategy table columns on narrow screens (table mode only) */
+@media screen and (min-width: 601px) and (max-width: 900px) {
+    .cbi-section-table td[data-name="filter_l3"],
+    .cbi-section-table th[data-name="filter_l3"],
+    .cbi-section-table td[data-name="protocol"],
+    .cbi-section-table th[data-name="protocol"] {
+        display: none;
+    }
+}
+
+@media screen and (min-width: 601px) and (max-width: 700px) {
+    .cbi-section-table td[data-name="filter_l7"],
+    .cbi-section-table th[data-name="filter_l7"],
+    .cbi-section-table td[data-name="_lists"],
+    .cbi-section-table th[data-name="_lists"] {
+        display: none;
+    }
+}

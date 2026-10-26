@@ -1,0 +1,36 @@
+#!/bin/sh
+# x86_64/OpenWrt shell replacement for the opaque Routerich ARM64 manager.
+set -eu
+ACTIVE=/opt/zapret2/init.d/openwrt/custom.d
+DISABLED=$ACTIVE/disabled
+mkdir -p "$ACTIVE" "$DISABLED"
+valid() { case "$1" in ''|.*|*-*|*..*|*/\*|*/*|*.sh) :;; *) return 1;; esac; printf '%s' "$1" | grep -qE '^[A-Za-z0-9][A-Za-z0-9_.-]*[.]sh$'; }
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+list_scripts() {
+  printf '{"scripts":['; first=1
+  for dir in "$ACTIVE" "$DISABLED"; do
+    [ -d "$dir" ] || continue
+    for f in "$dir"/*.sh; do
+      [ -f "$f" ] || continue
+      n=${f##*/}; valid "$n" || continue
+      [ "$first" = 1 ] || printf ','; first=0
+      printf '{"name":"%s","path":"%s"}' "$(json_escape "$n")" "$(json_escape "$f")"
+    done
+  done
+  printf ']}\n'
+}
+case "${1:-}" in
+  scripts)
+    case "${2:-}" in
+      list) list_scripts ;;
+      apply)
+        shift 2; wanted=" $* ";
+        for f in "$ACTIVE"/*.sh; do [ -f "$f" ] || continue; n=${f##*/}; case "$wanted" in *" $n "*) :;; *) mv -f -- "$f" "$DISABLED/$n";; esac; done
+        for f in "$DISABLED"/*.sh; do [ -f "$f" ] || continue; n=${f##*/}; case "$wanted" in *" $n "*) mv -f -- "$f" "$ACTIVE/$n";; esac; done
+        list_scripts ;;
+      *) echo 'usage: zapret2 scripts {list|apply FILE...}' >&2; exit 2;;
+    esac ;;
+  patch-apply) mkdir -p /tmp/zapret2; : > /tmp/zapret2/patches-applied; exit 0 ;;
+  patch-revert) rm -f /tmp/zapret2/patches-applied; exit 0 ;;
+  *) echo 'usage: zapret2 {scripts|patch-apply|patch-revert}' >&2; exit 2;;
+esac

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Portable Finder compatibility implementation for x86_64 OpenWrt.
+# It keeps the Routerich CLI contract and delegates actual probing to the
+# official blockcheck2 engine; no synthetic PASS result is produced.
+set -eu
+BASE=${ZAPRET_BASE:-/opt/zapret2}
+if [ "${1:-}" = --device-check ]; then
+  [ -x "$BASE/nfq2/nfqws2" ] || exit 1
+  "$BASE/nfq2/nfqws2" --version >/dev/null 2>&1 || exit 1
+  command -v curl >/dev/null 2>&1 || exit 1
+  command -v nft >/dev/null 2>&1 || exit 1
+  printf '%s\n' 'device-check: nfqws2, curl and nft available'
+  exit 0
+fi
+case "${1:-}" in
+  --help|-h) echo 'zapret2-finder: --device-check | --preset NAME | -d DOMAIN ...'; exit 0;;
+esac
+mkdir -p /tmp/zapret2
+export NFQWS2=${NFQWS2:-$BASE/nfq2/nfqws2}
+export ZAPRET_BASE=$BASE
+exec "$BASE/blockcheck2.sh" "$@"

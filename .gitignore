@@ -1,0 +1,11 @@
+.ssh/
+backups/
+*.log
+.work/
+dist/
+tmp/
+.tmp/
+
+port/staging/
+port/*.tar.gz
+.sync-sources.tgz

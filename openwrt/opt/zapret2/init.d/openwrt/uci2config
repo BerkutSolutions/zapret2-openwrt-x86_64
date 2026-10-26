@@ -1,0 +1,88 @@
+#!/bin/sh
+# Berkut Router Manager owned UCI compiler for the official zapret2 runtime.
+# This file is an independent adapter; it does not execute UCI-provided shell.
+set -eu
+
+BASE=${ZAPRET_BASE:-/opt/zapret2}
+OUT="$BASE/config"
+CHECK=0
+[ "${1:-}" = "--check" ] && CHECK=1
+[ "${1:-}" = "" ] || [ "$CHECK" = 1 ] || { echo "usage: $0 [--check]" >&2; exit 2; }
+[ -f /etc/config/zapret2 ] || { echo "missing /etc/config/zapret2" >&2; exit 1; }
+[ -f "$BASE/config.default" ] || { echo "missing $BASE/config.default" >&2; exit 1; }
+
+q() { /sbin/uci -q get "zapret2.$1" 2>/dev/null || true; }
+bool() { case "${1:-}" in 1|yes|true|on) echo 1;; *) echo 0;; esac; }
+int() { case "${1:-}" in ''|*[!0-9]*) return 1;; esac; }
+hex() { case "${1:-}" in 0x[0-9a-fA-F]*) return 0;; *) return 1;; esac; }
+ports() { printf '%s' "${1:-}" | grep -Eq '^~?[0-9]+(-[0-9]+)?(,~?[0-9]+(-[0-9]+)?)*$'; }
+sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+enabled=$(bool "$(q main.enabled)")
+qnum=$(q main.qnum); int "$qnum" && [ "$qnum" -le 65535 ] || qnum=300
+mark=$(q main.desync_mark); hex "$mark" || mark=0x40000000
+markpost=$(q main.desync_mark_postnat); hex "$markpost" || markpost=0x20000000
+tcp=$(q main.nfqws_ports_tcp); ports "$tcp" || tcp=80,443
+udp=$(q main.nfqws_ports_udp); ports "$udp" || udp=443
+user=$(q main.ws_user); [ -n "$user" ] || user=daemon
+postnat=$(bool "$(q main.postnat)")
+ipv6=$(bool "$(q main.enable_ipv6)")
+flow=$(q main.flowoffload); case "$flow" in donttouch|none|software|hardware) ;; *) flow=donttouch;; esac
+mode=$(q main.mode_filter); case "$mode" in none|ipset|hostlist|autohostlist) ;; *) mode=none;; esac
+
+tmp="${OUT}.new.$$"
+trap 'rm -f "$tmp"' EXIT HUP INT TERM
+cp "$BASE/config.default" "$tmp"
+setvar() { name=$1; value=$2; esc=$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g'); if grep -qE "^#?${name}=" "$tmp"; then sed -i -E "s|^#?${name}=.*|${name}=${esc}|" "$tmp"; else printf '%s=%s\n' "$name" "$value" >> "$tmp"; fi; }
+setvar NFQWS2_ENABLE "$enabled"
+setvar QNUM "$qnum"
+setvar DESYNC_MARK "$mark"
+setvar DESYNC_MARK_POSTNAT "$markpost"
+setvar NFQWS2_PORTS_TCP "$tcp"
+setvar NFQWS2_PORTS_UDP "$udp"
+setvar WS_USER "$(sq "$user")"
+setvar POSTNAT "$postnat"
+setvar FLOWOFFLOAD "$flow"
+setvar MODE_FILTER "$mode"
+[ "$ipv6" = 1 ] && setvar DISABLE_IPV6 0 || setvar DISABLE_IPV6 1
+
+# Replace only the generated NFQWS2_OPT block. Unknown UCI options are not
+# interpreted and remain available to the manager's RAW round-trip API.
+awk '/^NFQWS2_OPT="/{skip=1; next} skip && /^"[[:space:]]*$/{skip=0; next} !skip{print}' "$tmp" > "${tmp}.base"
+mv "${tmp}.base" "$tmp"
+strategy_file="${tmp}.strategies"
+: > "$strategy_file"
+strategy_count=0
+append_strategy() {
+    sec=$1; en=$(bool "$(/sbin/uci -q get "zapret2.$sec.enabled" 2>/dev/null || true)"); [ "$en" = 1 ] || return 0
+    raw=$(/sbin/uci -q get "zapret2.$sec.raw" 2>/dev/null || true)
+    [ -n "$raw" ] || raw=$(/sbin/uci -q get "zapret2.$sec.script" 2>/dev/null || true)
+    [ -n "$raw" ] || return 0
+    # The runtime config is sourced by /bin/sh.  Preserve the raw text as data
+    # but reject shell metacharacters that cannot represent nfqws2 arguments
+    # safely in the official shell-based runtime.
+    printf '%s' "$raw" | grep -q '[`;&|<>]' && { echo "unsafe RAW argument in $sec" >&2; exit 1; }
+    [ "$strategy_count" -eq 0 ] || printf '%s\n' '--new' >> "$strategy_file"
+    # Older UCI exports may end a RAW field with a literal "\\n" marker.
+    # It is a serializer artifact, not an nfqws2 option.
+    raw=${raw//\\n/ }
+    # Keep every profile on its own physical line.  In particular, do not let
+    # the following `--new` marker concatenate with a RAW value ending in
+    # `:final`, which makes nfqws2 reject the complete config at startup.
+    printf '%s\n' "$raw" | tr '\n' ' ' | sed 's/[[:space:]]*$//' >> "$strategy_file"
+    printf '\n' >> "$strategy_file"
+    strategy_count=$((strategy_count + 1))
+}
+for sec in $(/sbin/uci show zapret2 2>/dev/null | sed -n "s/^zapret2\.\([^.=]*\)=strategy$/\1/p"); do append_strategy "$sec"; done
+if [ -s "$strategy_file" ]; then
+    { cat "$tmp"; printf 'NFQWS2_OPT="\n'; sed 's/\\/\\\\/g; s/"/\\"/g; s/\$/\\$/g' "$strategy_file"; printf '"\n'; } > "${tmp}.final"
+    mv "${tmp}.final" "$tmp"
+fi
+rm -f "$strategy_file"
+/bin/sh -n "$tmp"
+[ -s "$tmp" ] || exit 1
+if [ "$CHECK" = 1 ]; then echo "Config check passed: $OUT"; exit 0; fi
+mkdir -p "$(dirname "$OUT")"
+mv "$tmp" "$OUT"
+trap - EXIT HUP INT TERM
+echo "Config updated: $OUT"

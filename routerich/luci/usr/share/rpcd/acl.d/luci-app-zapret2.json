@@ -1,0 +1,77 @@
+{
+	"luci-app-zapret2": {
+		"description": "Grant access to zapret2 configuration",
+		"read": {
+			"ubus": {
+				"luci": [ "getInitList", "setInitAction" ],
+				"service": [ "list" ],
+				"uci": [ "get", "state" ],
+				"file": [ "list", "read", "stat", "remove", "exec", "write" ]
+			},
+			"uci": [ "zapret2" ],
+			"file": {
+				"/usr/lib/opkg/info/luci-app-zapret2.control": [ "read" ],
+				"/etc/init.d/zapret2": [ "read", "exec" ],
+				"/opt/zapret2/*": [ "read", "list" ],
+				"/opt/zapret2/files/fake": [ "list" ],
+				"/opt/zapret2/files/fake/*": [ "read", "list" ],
+				"/opt/zapret2/defaults/*": [ "read" ],
+				"/opt/zapret2/defaults/zapret2.uci": [ "read" ],
+				"/opt/zapret2/ipset/*": [ "read", "list" ],
+				"/opt/zapret2/ipset/zapret_hosts_auto_debug.log": [ "read" ],
+				"/opt/zapret2/init.d/openwrt/custom.d/*": [ "read", "list", "write", "remove" ],
+				"/opt/zapret2/init.d/openwrt/custom.d/disabled/*": [ "read", "list", "write", "remove" ],
+				"/tmp/blockcheck_run.sh": [ "read", "write", "remove", "exec" ],
+				"/tmp/blockcheck2.status": [ "read", "write", "remove" ],
+				"/tmp/blockcheck2.stop": [ "read", "write", "remove" ],
+				"/tmp/zapret2-finder.status": [ "read", "write", "remove" ],
+				"/tmp/zapret2-finder.stop": [ "read", "write", "remove" ],
+				"/tmp/zapret2-finder_run.sh": [ "read", "write", "remove", "exec" ],
+				"/tmp/zapret2-finder-strategy.txt": [ "read", "write", "remove" ],
+				"/opt/zapret2/zapret2-finder": [ "read", "exec" ],
+				"/tmp/zapret2": [ "list" ],
+				"/tmp/zapret2/*": [ "read", "list", "write", "remove" ],
+				"/opt/zapret2/blockcheck2.sh": [ "read", "exec" ],
+				"/opt/zapret2/reset-defaults.sh": [ "exec" ],
+				"/usr/bin/zapret2": [ "exec" ],
+				"/usr/bin/pgrep": [ "exec" ],
+				"/usr/bin/find": [ "exec" ],
+				"/usr/bin/tail": [ "exec" ],
+				"/usr/bin/zapret2-testctl": [ "exec" ],
+				"/bin/sh": [ "exec" ],
+				"/bin/grep": [ "exec" ],
+				"/bin/mkdir": [ "exec" ],
+				"/usr/bin/wc": [ "exec" ]
+			}
+		},
+		"write": {
+			"ubus": {
+				"luci": [ "setInitAction" ],
+				"uci": [ "add", "apply", "changes", "commit", "delete", "order", "rename", "set" ],
+				"file": [ "write", "remove", "exec", "read" ]
+			},
+			"uci": [ "zapret2" ],
+			"file": {
+				"/etc/init.d/zapret2": [ "exec" ],
+				"/etc/config/zapret2": [ "read", "write" ],
+				"/opt/zapret2/config": [ "write" ],
+				"/opt/zapret2/ipset/*": [ "write", "remove" ],
+				"/opt/zapret2/init.d/openwrt/custom.d/*": [ "read", "write", "remove" ],
+				"/opt/zapret2/init.d/openwrt/custom.d/disabled/*": [ "read", "write", "remove" ],
+				"/tmp/blockcheck_run.sh": [ "read", "write", "remove", "exec" ],
+				"/tmp/blockcheck2.status": [ "read", "write", "remove" ],
+				"/tmp/blockcheck2.stop": [ "read", "write", "remove" ],
+				"/tmp/zapret2-finder.status": [ "read", "write", "remove" ],
+				"/tmp/zapret2-finder.stop": [ "read", "write", "remove" ],
+				"/tmp/zapret2-finder_run.sh": [ "read", "write", "remove", "exec" ],
+				"/tmp/zapret2-finder-strategy.txt": [ "read", "write", "remove" ],
+				"/opt/zapret2/zapret2-finder": [ "read", "exec" ],
+				"/tmp/zapret2/*": [ "read", "write", "remove" ],
+				"/opt/zapret2/reset-defaults.sh": [ "exec" ],
+				"/usr/bin/zapret2": [ "exec" ],
+				"/usr/bin/zapret2-testctl": [ "exec" ],
+				"/bin/chmod": [ "exec" ]
+			}
+		}
+	}
+}

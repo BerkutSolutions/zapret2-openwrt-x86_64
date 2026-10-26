@@ -1,0 +1,35 @@
+#!/bin/sh
+# PID-scoped controller for disposable Blockcheck2/Finder jobs.
+# The production procd nfqws2 instances are never discovered by name.
+set -eu
+
+BASE=/tmp/zapret2
+case "${1:-}" in
+  start) exit 0 ;;
+  stop) kind=${2:-};;
+  status) kind=${2:-};;
+  *) echo "usage: $0 {stop|status} {blockcheck|finder}" >&2; exit 2 ;;
+esac
+case "$kind" in
+  blockcheck) pidfile="$BASE/blockcheck.pid" ;;
+  finder) pidfile="$BASE/finder.pid" ;;
+  *) echo "unknown test kind" >&2; exit 2 ;;
+esac
+[ -r "$pidfile" ] || { [ "$1" = status ] && exit 1; exit 0; }
+pid=$(cat "$pidfile" 2>/dev/null || true)
+case "$pid" in ''|*[!0-9]*) rm -f "$pidfile"; exit 0;; esac
+alive() { kill -0 "$1" 2>/dev/null; }
+children() {
+  for child in /proc/[0-9]*; do
+    child=${child##*/}
+    [ -r "/proc/$child/stat" ] || continue
+    ppid=$(awk '{print $4}' "/proc/$child/stat" 2>/dev/null || true)
+    [ "$ppid" = "$1" ] || continue
+    children "$child"
+    kill -TERM "$child" 2>/dev/null || true
+  done
+}
+if [ "$1" = status ]; then alive "$pid"; exit $?; fi
+if alive "$pid"; then children "$pid"; kill -TERM "$pid" 2>/dev/null || true; fi
+rm -f "$pidfile"
+exit 0

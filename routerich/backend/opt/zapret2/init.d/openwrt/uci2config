@@ -1,0 +1,647 @@
+#!/bin/sh
+# UCI to shell config generator for zapret2
+# Reads /etc/config/zapret2 and generates /opt/zapret2/config
+
+ZAPRET_BASE="${ZAPRET_BASE:-/opt/zapret2}"
+TARGET_CONFIG_FILE="$ZAPRET_BASE/config"
+CONFIG_FILE=""
+LOCK_FILE="/var/lock/zapret2_config.lock"
+CHECK_ONLY=0
+
+case "${1:-}" in
+    '') ;;
+    --check) CHECK_ONLY=1 ;;
+    *) echo "Usage: $0 [--check]"; exit 2 ;;
+esac
+
+cleanup_config() {
+    [ -n "$CONFIG_FILE" ] || return 0
+    rm -f "$CONFIG_FILE" "${CONFIG_FILE}.tmp"
+}
+
+trap cleanup_config 0 1 2 15
+
+# Sanitize value - remove dangerous shell characters
+# Only allow: alphanumeric, space, comma, dot, hyphen, underscore, colon, equals, slash, newline
+# Note: hyphen must be at the end of character class to avoid being interpreted as range
+sanitize_value() {
+    printf '%s' "$1" | tr -cd 'a-zA-Z0-9 ,.:=/\n_-'
+}
+
+# Validate hex value (for marks)
+validate_hex() {
+    printf '%s' "$1" | grep -qE '^0x[0-9a-fA-F]+$'
+}
+
+# Validate integer
+validate_int() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Validate port list (comma-separated integers or ranges)
+validate_ports() {
+    printf '%s' "$1" | grep -qE '^~?[0-9]+(-[0-9]+)?(,~?[0-9]+(-[0-9]+)?)*$'
+}
+
+# Acquire lock to prevent race conditions
+exec 200>"$LOCK_FILE"
+flock -n 200 || {
+    echo "Another uci2config instance is running, waiting..."
+    flock 200
+}
+
+# Check if UCI config exists
+UCI_CONFIG_FILE="${UCI_CONFIG_DIR:-/etc/config}/zapret2"
+[ -f "$UCI_CONFIG_FILE" ] || {
+    echo "No UCI config found, using default config"
+    exit 0
+}
+
+# config_load uses non-strict parsing and can silently return partial data.
+# Validate with libuci first; this supports normal multiline UCI values.
+if [ -n "${UCI_CONFIG_DIR:-}" ]; then
+    UCI_ERROR="$(/sbin/uci -c "$UCI_CONFIG_DIR" -s export zapret2 2>&1 >/dev/null)"
+    UCI_RC=$?
+else
+    UCI_ERROR="$(/sbin/uci -s export zapret2 2>&1 >/dev/null)"
+    UCI_RC=$?
+fi
+if [ "$UCI_RC" -ne 0 ]; then
+    echo "Error: invalid UCI syntax in $UCI_CONFIG_FILE"
+    [ -z "$UCI_ERROR" ] || printf '%s\n' "$UCI_ERROR"
+    exit 1
+fi
+
+. /lib/functions.sh
+config_load zapret2
+
+# Read main section with validation
+config_get_bool ENABLED main enabled 1
+config_get_bool DEBUG main debug 0
+config_get_bool CUSTOM_SCRIPTS main custom_scripts 1
+
+config_get QNUM main qnum 300
+validate_int "$QNUM" || QNUM=300
+[ "$QNUM" -ge 0 ] && [ "$QNUM" -le 65535 ] || QNUM=300
+
+config_get DESYNC_MARK main desync_mark "0x40000000"
+validate_hex "$DESYNC_MARK" || DESYNC_MARK="0x40000000"
+
+config_get DESYNC_MARK_POSTNAT main desync_mark_postnat "0x20000000"
+validate_hex "$DESYNC_MARK_POSTNAT" || DESYNC_MARK_POSTNAT="0x20000000"
+
+config_get NFQWS_PORTS_TCP main nfqws_ports_tcp "80,443"
+validate_ports "$NFQWS_PORTS_TCP" || NFQWS_PORTS_TCP="80,443"
+
+config_get NFQWS_PORTS_UDP main nfqws_ports_udp "443"
+validate_ports "$NFQWS_PORTS_UDP" || NFQWS_PORTS_UDP="443"
+
+config_get NFQWS_TCP_PKT_OUT main nfqws_tcp_pkt_out "25"
+validate_int "$NFQWS_TCP_PKT_OUT" || NFQWS_TCP_PKT_OUT="25"
+[ "$NFQWS_TCP_PKT_OUT" -ge 1 ] && [ "$NFQWS_TCP_PKT_OUT" -le 1000 ] || NFQWS_TCP_PKT_OUT="25"
+
+config_get NFQWS_TCP_PKT_IN main nfqws_tcp_pkt_in "5"
+validate_int "$NFQWS_TCP_PKT_IN" || NFQWS_TCP_PKT_IN="5"
+[ "$NFQWS_TCP_PKT_IN" -ge 0 ] && [ "$NFQWS_TCP_PKT_IN" -le 1000 ] || NFQWS_TCP_PKT_IN="5"
+
+config_get FILTER_MARK main filter_mark ""
+[ -n "$FILTER_MARK" ] && { validate_hex "$FILTER_MARK" || FILTER_MARK=""; }
+
+config_get_bool POSTNAT main postnat 1
+
+config_get_bool ENABLE_IPV6 main enable_ipv6 0
+
+config_get_bool FILTER_TTL_EXPIRED_ICMP main filter_ttl_expired_icmp 1
+
+config_get FLOWOFFLOAD main flowoffload "donttouch"
+case "$FLOWOFFLOAD" in
+    donttouch|none|software|hardware) ;;
+    *) FLOWOFFLOAD="donttouch" ;;
+esac
+
+config_get OPENWRT_LAN main openwrt_lan ""
+OPENWRT_LAN=$(sanitize_value "$OPENWRT_LAN")
+
+config_get OPENWRT_WAN4 main openwrt_wan4 ""
+OPENWRT_WAN4=$(sanitize_value "$OPENWRT_WAN4")
+
+config_get OPENWRT_WAN6 main openwrt_wan6 ""
+OPENWRT_WAN6=$(sanitize_value "$OPENWRT_WAN6")
+
+config_get WS_USER main ws_user "daemon"
+WS_USER=$(sanitize_value "$WS_USER")
+[ -z "$WS_USER" ] && WS_USER="daemon"
+
+config_get NFQWS_PORTS_TCP_KEEPALIVE main nfqws_ports_tcp_keepalive ""
+[ -n "$NFQWS_PORTS_TCP_KEEPALIVE" ] && { validate_ports "$NFQWS_PORTS_TCP_KEEPALIVE" || NFQWS_PORTS_TCP_KEEPALIVE=""; }
+
+config_get NFQWS_PORTS_UDP_KEEPALIVE main nfqws_ports_udp_keepalive ""
+[ -n "$NFQWS_PORTS_UDP_KEEPALIVE" ] && { validate_ports "$NFQWS_PORTS_UDP_KEEPALIVE" || NFQWS_PORTS_UDP_KEEPALIVE=""; }
+
+config_get NFQWS_UDP_PKT_OUT main nfqws_udp_pkt_out "5"
+validate_int "$NFQWS_UDP_PKT_OUT" || NFQWS_UDP_PKT_OUT="5"
+[ "$NFQWS_UDP_PKT_OUT" -ge 0 ] && [ "$NFQWS_UDP_PKT_OUT" -le 1000 ] || NFQWS_UDP_PKT_OUT="5"
+
+config_get NFQWS_UDP_PKT_IN main nfqws_udp_pkt_in "3"
+validate_int "$NFQWS_UDP_PKT_IN" || NFQWS_UDP_PKT_IN="3"
+[ "$NFQWS_UDP_PKT_IN" -ge 0 ] && [ "$NFQWS_UDP_PKT_IN" -le 1000 ] || NFQWS_UDP_PKT_IN="3"
+
+config_get SET_MAXELEM main set_maxelem "522288"
+validate_int "$SET_MAXELEM" || SET_MAXELEM="522288"
+
+config_get_bool GZIP_LISTS main gzip_lists 1
+
+config_get MDIG_THREADS main mdig_threads "30"
+validate_int "$MDIG_THREADS" || MDIG_THREADS="30"
+
+config_get MODE_FILTER main mode_filter "none"
+case "$MODE_FILTER" in
+    none|ipset|hostlist|autohostlist) ;;
+    *) MODE_FILTER="none" ;;
+esac
+
+# Autohostlist settings with validation
+config_get_bool AUTOHOSTLIST_ENABLED main autohostlist_enabled 0
+
+config_get AUTOHOSTLIST_FILE main autohostlist_file "$ZAPRET_BASE/ipset/zapret_hosts_auto.txt"
+AUTOHOSTLIST_FILE=$(sanitize_value "$AUTOHOSTLIST_FILE")
+
+config_get AUTOHOSTLIST_FAIL_THRESHOLD main autohostlist_fail_threshold 3
+validate_int "$AUTOHOSTLIST_FAIL_THRESHOLD" || AUTOHOSTLIST_FAIL_THRESHOLD=3
+[ "$AUTOHOSTLIST_FAIL_THRESHOLD" -ge 1 ] && [ "$AUTOHOSTLIST_FAIL_THRESHOLD" -le 100 ] || AUTOHOSTLIST_FAIL_THRESHOLD=3
+
+config_get AUTOHOSTLIST_FAIL_TIME main autohostlist_fail_time 60
+validate_int "$AUTOHOSTLIST_FAIL_TIME" || AUTOHOSTLIST_FAIL_TIME=60
+[ "$AUTOHOSTLIST_FAIL_TIME" -ge 1 ] && [ "$AUTOHOSTLIST_FAIL_TIME" -le 3600 ] || AUTOHOSTLIST_FAIL_TIME=60
+
+config_get AUTOHOSTLIST_RETRANS_THRESHOLD main autohostlist_retrans_threshold 3
+validate_int "$AUTOHOSTLIST_RETRANS_THRESHOLD" || AUTOHOSTLIST_RETRANS_THRESHOLD=3
+[ "$AUTOHOSTLIST_RETRANS_THRESHOLD" -ge 1 ] && [ "$AUTOHOSTLIST_RETRANS_THRESHOLD" -le 100 ] || AUTOHOSTLIST_RETRANS_THRESHOLD=3
+
+config_get_bool AUTOHOSTLIST_DEBUGLOG main autohostlist_debuglog 0
+
+config_get AUTOHOSTLIST_INCOMING_MAXSEQ main autohostlist_incoming_maxseq 4096
+validate_int "$AUTOHOSTLIST_INCOMING_MAXSEQ" || AUTOHOSTLIST_INCOMING_MAXSEQ=4096
+
+config_get AUTOHOSTLIST_RETRANS_MAXSEQ main autohostlist_retrans_maxseq 32768
+validate_int "$AUTOHOSTLIST_RETRANS_MAXSEQ" || AUTOHOSTLIST_RETRANS_MAXSEQ=32768
+
+config_get_bool AUTOHOSTLIST_RETRANS_RESET main autohostlist_retrans_reset 1
+
+config_get AUTOHOSTLIST_UDP_IN main autohostlist_udp_in 1
+validate_int "$AUTOHOSTLIST_UDP_IN" || AUTOHOSTLIST_UDP_IN=1
+
+config_get AUTOHOSTLIST_UDP_OUT main autohostlist_udp_out 4
+validate_int "$AUTOHOSTLIST_UDP_OUT" || AUTOHOSTLIST_UDP_OUT=4
+
+# Count enabled strategies
+STRATEGY_COUNT=0
+_count_strategy() {
+    local enabled
+    config_get_bool enabled "$1" enabled 1
+    [ "$enabled" = "1" ] && STRATEGY_COUNT=$((STRATEGY_COUNT + 1))
+}
+config_foreach _count_strategy strategy
+
+# Generate NFQWS2_OPT from strategies
+# Lua garbage collector interval (from UCI, default 600 seconds)
+config_get lua_gc main lua_gc "600"
+[ -n "$lua_gc" ] && [ "$lua_gc" != "0" ] && NFQWS2_OPT="--lua-gc=$lua_gc" || NFQWS2_OPT=""
+
+# Connection tracking timeouts (SYN:EST:FIN) - required for orchestration
+config_get ctrack_timeouts main ctrack_timeouts "60:300:60:60"
+[ -n "$ctrack_timeouts" ] || ctrack_timeouts="60:300:60:60"
+NFQWS2_OPT="$NFQWS2_OPT --ctrack-timeouts=$ctrack_timeouts"
+
+_process_luascript() {
+    local section="$1"
+    local path enabled
+    config_get_bool enabled "$section" enabled 0
+    [ "$enabled" = "1" ] || return
+    config_get path "$section" path
+    [ -n "$path" ] && [ -f "$path" ] && {
+        NFQWS2_OPT="$NFQWS2_OPT --lua-init=@$path"
+    }
+}
+
+_process_blob() {
+    local section="$1"
+    local path enabled
+    config_get_bool enabled "$section" enabled 0
+    [ "$enabled" = "1" ] || return
+    config_get path "$section" path
+    [ -n "$path" ] && [ -f "$path" ] && {
+        NFQWS2_OPT="$NFQWS2_OPT --blob=$section:@$path"
+    }
+}
+
+STRATEGY_NUM=0
+
+_process_strategy() {
+    local section="$1"
+    local enabled port script
+    local filter_opts="" hostlist_opts="" exclude_opts="" autohostlist_opts=""
+
+    config_get_bool enabled "$section" enabled 1
+    [ "$enabled" = "0" ] && return
+
+    config_get port "$section" port "443"
+    validate_ports "$port" || port="443"
+
+    config_get script "$section" script ""
+
+    # Normalize script - only normalize whitespace, no character filtering
+    [ -n "$script" ] && {
+        # Normalize whitespace (newlines to spaces, collapse multiple spaces)
+        script=$(printf '%s' "$script" | tr '\n' ' ' | sed 's/\\[[:space:]]*/ /g; s/[[:space:]]\+/ /g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+    }
+
+    local proto_list=""
+    _add_proto() {
+        local p="$1"
+        case "$p" in
+            tcp|udp) proto_list="$proto_list $p" ;;
+        esac
+    }
+    config_list_foreach "$section" protocol _add_proto
+    [ -z "$proto_list" ] && {
+        local proto_str=""
+        config_get proto_str "$section" protocol "tcp"
+        for p in $proto_str; do _add_proto "$p"; done
+    }
+    [ -z "$proto_list" ] && proto_list="tcp"
+    for p in $proto_list; do
+        filter_opts="$filter_opts --filter-${p}=${port}"
+    done
+    filter_opts="${filter_opts# }"
+
+    # L3 filters (comma-separated: ipv4, ipv6)
+    local l3_list=""
+    _add_l3() {
+        local l3="$1"
+        case "$l3" in
+            ipv4|ipv6)
+                [ -n "$l3_list" ] && l3_list="$l3_list,$l3" || l3_list="$l3"
+                ;;
+        esac
+    }
+    config_list_foreach "$section" filter_l3 _add_l3
+    [ -z "$l3_list" ] && {
+        local filter_l3_str=""
+        config_get filter_l3_str "$section" filter_l3 ""
+        [ -n "$filter_l3_str" ] && _add_l3 "$filter_l3_str"
+    }
+    [ -n "$l3_list" ] && filter_opts="$filter_opts --filter-l3=$l3_list"
+
+    # L7 filters (comma-separated) - validate each value
+    # Handles both string option (single/comma-separated) and list option (multiple values)
+    local l7_list=""
+    _append_l7() {
+        local l7="$1"
+        [ -n "$l7" ] || return
+        case ",$l7_list," in
+            *,"$l7",*) ;;
+            *)
+                [ -n "$l7_list" ] && l7_list="$l7_list,$l7" || l7_list="$l7"
+                ;;
+        esac
+    }
+    _add_l7() {
+        local l7 token
+        for l7 in $(printf '%s' "$1" | tr ',' ' '); do
+            # Only allow supported L7 filters
+            case "$l7" in
+                all|unknown|known|tls|http|quic|dns|stun|wireguard|dht|discord|xmpp|mtproto)
+                    _append_l7 "$l7"
+                    ;;
+            esac
+        done
+    }
+    # First try list option
+    config_list_foreach "$section" filter_l7 _add_l7
+    # If list was empty, try string option
+    [ -z "$l7_list" ] && {
+        local filter_l7_str=""
+        config_get filter_l7_str "$section" filter_l7 ""
+        [ -n "$filter_l7_str" ] && _add_l7 "$filter_l7_str"
+    }
+    [ -n "$l7_list" ] && filter_opts="$filter_opts --filter-l7=$l7_list"
+
+    # Hostlists - validate paths
+    # Handles both string option (single value) and list option (multiple values)
+    local hostlist_processed=0
+    _add_hostlist() {
+        local list_name="$1" list_path opt_name
+        config_get list_path "$list_name" path
+        [ -n "$list_path" ] || return
+        # Sanitize path and check for path traversal
+        list_path=$(sanitize_value "$list_path")
+        case "$list_path" in
+            *../*|*..*) return ;; # Reject path traversal
+        esac
+        case "$list_name" in
+            *exclude*) opt_name="--hostlist-exclude" ;;
+            *) opt_name="--hostlist" ;;
+        esac
+        if [ -f "${list_path}.gz" ]; then
+            hostlist_opts="$hostlist_opts ${opt_name}=${list_path}.gz"
+            hostlist_processed=1
+        elif [ -f "$list_path" ]; then
+            hostlist_opts="$hostlist_opts ${opt_name}=$list_path"
+            hostlist_processed=1
+        fi
+    }
+    # First try list option
+    config_list_foreach "$section" hostlist _add_hostlist
+    # If list was empty, try string option
+    [ "$hostlist_processed" = "0" ] && {
+        local hostlist_str=""
+        config_get hostlist_str "$section" hostlist ""
+        [ -n "$hostlist_str" ] && _add_hostlist "$hostlist_str"
+    }
+
+    # Exclude hostlists - validate paths
+    # Handles both string option (single value) and list option (multiple values)
+    local exclude_processed=0
+    _add_exclude() {
+        local list_name="$1" list_path
+        config_get list_path "$list_name" path
+        [ -n "$list_path" ] || return
+        list_path=$(sanitize_value "$list_path")
+        case "$list_path" in *../*|*..*) return ;; esac
+        if [ -f "${list_path}.gz" ]; then
+            exclude_opts="$exclude_opts --hostlist-exclude=${list_path}.gz"
+            exclude_processed=1
+        elif [ -f "$list_path" ]; then
+            exclude_opts="$exclude_opts --hostlist-exclude=$list_path"
+            exclude_processed=1
+        fi
+    }
+    # First try list option
+    config_list_foreach "$section" hostlist_exclude _add_exclude
+    # If list was empty, try string option
+    [ "$exclude_processed" = "0" ] && {
+        local exclude_str=""
+        config_get exclude_str "$section" hostlist_exclude ""
+        [ -n "$exclude_str" ] && _add_exclude "$exclude_str"
+    }
+
+    # IP sets - validate paths
+    local ipset_opts=""
+    _add_ipset() {
+        local list_name="$1" list_path
+        config_get list_path "$list_name" path
+        [ -n "$list_path" ] || return
+        list_path=$(sanitize_value "$list_path")
+        case "$list_path" in *../*|*..*) return ;; esac
+        if [ -f "${list_path}.gz" ]; then
+            ipset_opts="$ipset_opts --ipset=${list_path}.gz"
+        elif [ -f "$list_path" ]; then
+            ipset_opts="$ipset_opts --ipset=$list_path"
+        fi
+    }
+    config_list_foreach "$section" ipset _add_ipset
+
+    # Exclude IP sets - validate paths
+    local ipset_exclude_opts=""
+    _add_ipset_exclude() {
+        local list_name="$1" list_path
+        config_get list_path "$list_name" path
+        [ -n "$list_path" ] || return
+        list_path=$(sanitize_value "$list_path")
+        case "$list_path" in *../*|*..*) return ;; esac
+        if [ -f "${list_path}.gz" ]; then
+            ipset_exclude_opts="$ipset_exclude_opts --ipset-exclude=${list_path}.gz"
+        elif [ -f "$list_path" ]; then
+            ipset_exclude_opts="$ipset_exclude_opts --ipset-exclude=$list_path"
+        fi
+    }
+    config_list_foreach "$section" ipset_exclude _add_ipset_exclude
+
+    # Autohostlist - per-strategy setting
+    local strategy_autohostlist strategy_autohostlist_debuglog
+    config_get_bool strategy_autohostlist "$section" autohostlist 0
+    [ "$strategy_autohostlist" = "1" ] && {
+        autohostlist_opts="--hostlist-auto=$ZAPRET_BASE/ipset/zapret_hosts_auto.txt"
+        # Add debug log if enabled per-strategy
+        config_get_bool strategy_autohostlist_debuglog "$section" autohostlist_debuglog 0
+        [ "$strategy_autohostlist_debuglog" = "1" ] && {
+            autohostlist_opts="$autohostlist_opts --hostlist-auto-debug=$ZAPRET_BASE/ipset/zapret_hosts_auto_debug.log"
+        }
+    }
+
+    # Combine (shell word splitting collapses multiple spaces)
+    local strategy_opts="--name=$section"
+    for _part in $filter_opts $hostlist_opts $exclude_opts $ipset_opts $ipset_exclude_opts $autohostlist_opts; do
+        strategy_opts="$strategy_opts $_part"
+    done
+    [ -n "$script" ] && strategy_opts="$strategy_opts $script"
+
+    # Add --new separator between strategies
+    [ "$STRATEGY_NUM" -gt 0 ] && NFQWS2_OPT="$NFQWS2_OPT --new"
+    NFQWS2_OPT="$NFQWS2_OPT $strategy_opts"
+    STRATEGY_NUM=$((STRATEGY_NUM + 1))
+}
+
+# Process luascripts and blobs
+config_foreach _process_luascript luascript
+config_foreach _process_blob blob
+
+# Process strategies
+config_foreach _process_strategy strategy
+
+# Work on a private copy and replace the live config only after validation.
+[ -f "$TARGET_CONFIG_FILE" ] || {
+    echo "Error: config file not found: $TARGET_CONFIG_FILE"
+    exit 1
+}
+CONFIG_FILE="${TARGET_CONFIG_FILE}.new.$$"
+cp -p "$TARGET_CONFIG_FILE" "$CONFIG_FILE" || {
+    echo "Error: cannot create temporary config: $CONFIG_FILE"
+    exit 1
+}
+
+# Update or add a variable in config
+# Usage: update_var VARNAME value
+# Uncomments and updates if commented, adds if missing
+update_var() {
+    local var="$1" val="$2"
+    if grep -q "^#*${var}=" "$CONFIG_FILE"; then
+        awk -v v="$var" -v nv="${var}=${val}" '{if($0 ~ "^#*"v"=") print nv; else print}' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+    else
+        echo "${var}=${val}" >> "$CONFIG_FILE"
+    fi
+}
+
+# Comment out a variable
+# Usage: comment_var VARNAME
+comment_var() {
+    local var="$1"
+    awk -v v="$var" '{if($0 ~ "^"v"=") print "#"v"="; else print}' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+}
+
+# Update UCI-managed variables
+update_var NFQWS2_ENABLE "$ENABLED"
+if [ "$QNUM" != "300" ]; then
+    update_var QNUM "$QNUM"
+else
+    comment_var QNUM
+fi
+update_var DESYNC_MARK "$DESYNC_MARK"
+update_var DESYNC_MARK_POSTNAT "$DESYNC_MARK_POSTNAT"
+update_var WS_USER "$WS_USER"
+update_var NFQWS2_PORTS_TCP "$NFQWS_PORTS_TCP"
+update_var NFQWS2_PORTS_UDP "$NFQWS_PORTS_UDP"
+update_var NFQWS2_TCP_PKT_OUT "$NFQWS_TCP_PKT_OUT"
+update_var NFQWS2_TCP_PKT_IN "$NFQWS_TCP_PKT_IN"
+update_var NFQWS2_UDP_PKT_OUT "$NFQWS_UDP_PKT_OUT"
+update_var NFQWS2_UDP_PKT_IN "$NFQWS_UDP_PKT_IN"
+
+# Keepalive ports: update if set, comment out if empty
+case "$NFQWS_PORTS_TCP_KEEPALIVE" in
+    '') comment_var NFQWS2_PORTS_TCP_KEEPALIVE ;;
+    *) update_var NFQWS2_PORTS_TCP_KEEPALIVE "$NFQWS_PORTS_TCP_KEEPALIVE" ;;
+esac
+case "$NFQWS_PORTS_UDP_KEEPALIVE" in
+    '') comment_var NFQWS2_PORTS_UDP_KEEPALIVE ;;
+    *) update_var NFQWS2_PORTS_UDP_KEEPALIVE "$NFQWS_PORTS_UDP_KEEPALIVE" ;;
+esac
+update_var AUTOHOSTLIST_RETRANS_THRESHOLD "$AUTOHOSTLIST_RETRANS_THRESHOLD"
+update_var AUTOHOSTLIST_FAIL_THRESHOLD "$AUTOHOSTLIST_FAIL_THRESHOLD"
+update_var AUTOHOSTLIST_FAIL_TIME "$AUTOHOSTLIST_FAIL_TIME"
+update_var AUTOHOSTLIST_DEBUGLOG "$AUTOHOSTLIST_DEBUGLOG"
+update_var AUTOHOSTLIST_INCOMING_MAXSEQ "$AUTOHOSTLIST_INCOMING_MAXSEQ"
+update_var AUTOHOSTLIST_RETRANS_MAXSEQ "$AUTOHOSTLIST_RETRANS_MAXSEQ"
+update_var AUTOHOSTLIST_RETRANS_RESET "$AUTOHOSTLIST_RETRANS_RESET"
+update_var AUTOHOSTLIST_UDP_IN "$AUTOHOSTLIST_UDP_IN"
+update_var AUTOHOSTLIST_UDP_OUT "$AUTOHOSTLIST_UDP_OUT"
+update_var DAEMON_LOG_ENABLE "$DEBUG"
+update_var DAEMON_LOG_FILE '"/tmp/zapret2/<DAEMON_CFGNAME>.log"'
+update_var POSTNAT "$POSTNAT"
+update_var FILTER_TTL_EXPIRED_ICMP "$FILTER_TTL_EXPIRED_ICMP"
+update_var FLOWOFFLOAD "$FLOWOFFLOAD"
+update_var MODE_FILTER "$MODE_FILTER"
+
+update_var SET_MAXELEM "$SET_MAXELEM"
+update_var IPSET_OPT "\"hashsize 262144 maxelem \$SET_MAXELEM\""
+update_var GZIP_LISTS "$GZIP_LISTS"
+update_var MDIG_THREADS "$MDIG_THREADS"
+
+# OPENWRT_LAN/WAN: update if set, comment out if empty
+case "$OPENWRT_LAN" in
+    '') comment_var OPENWRT_LAN ;;
+    *) update_var OPENWRT_LAN "\"$OPENWRT_LAN\"" ;;
+esac
+case "$OPENWRT_WAN4" in
+    '') comment_var OPENWRT_WAN4 ;;
+    *) update_var OPENWRT_WAN4 "\"$OPENWRT_WAN4\"" ;;
+esac
+case "$OPENWRT_WAN6" in
+    '') comment_var OPENWRT_WAN6 ;;
+    *) update_var OPENWRT_WAN6 "\"$OPENWRT_WAN6\"" ;;
+esac
+
+# Inverted bools
+if [ "$ENABLE_IPV6" = "0" ]; then
+    update_var DISABLE_IPV6 1
+else
+    update_var DISABLE_IPV6 0
+fi
+
+if [ "$CUSTOM_SCRIPTS" = "0" ]; then
+    update_var DISABLE_CUSTOM 1
+else
+    comment_var DISABLE_CUSTOM
+fi
+
+# FILTER_MARK: update if set, comment out if empty
+case "$FILTER_MARK" in
+    ''|*[[:space:]]*)
+        comment_var FILTER_MARK
+        ;;
+    *)
+        update_var FILTER_MARK "$FILTER_MARK"
+        ;;
+esac
+
+# Remove old NFQWS2_OPT (single-line and multiline). Refuse to replace the
+# config if a malformed block has no closing quote.
+if ! awk '
+    /^NFQWS2_OPT=".*"[[:space:]]*(#.*)?$/ { next }
+    /^NFQWS2_OPT="/ { skip=1; next }
+    skip && /^[[:space:]]*"[[:space:]]*(#.*)?$/ { skip=0; next }
+    skip { next }
+    { print }
+    END { if (skip) exit 2 }
+' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"; then
+    echo "Error: unterminated NFQWS2_OPT block in $TARGET_CONFIG_FILE"
+    exit 1
+fi
+mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE" || exit 1
+sed -i '/<HOSTLIST/d' "$CONFIG_FILE"
+sed -i '/^# Generated from UCI config$/d' "$CONFIG_FILE"
+
+# Remove trailing empty lines
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$CONFIG_FILE"
+
+# Insert NFQWS2_OPT after "hostlist markers" comment (before MODE_FILTER), or append if marker not found
+# Format: multiline with each strategy on its own line (matching upstream config.default)
+ANCHOR="# hostlist markers are replaced to empty string if MODE_FILTER does not satisfy"
+[ -n "$NFQWS2_OPT" ] && [ "$STRATEGY_COUNT" -gt 0 ] && {
+    NFQWS2_OPT_ESCAPED=$(printf '%s' "$NFQWS2_OPT" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\$/\\$/g; s/`/\\`/g')
+    # Format as multiline: split on --new, each strategy on its own line
+    NFQWS2_BLOCK=$(printf '%s' "$NFQWS2_OPT_ESCAPED" | sed 's/ --new / --new\n/g; s/^ //')
+    # Build multiline block via tmpfile to avoid sed multiline issues
+    TMPCONF="${CONFIG_FILE}.tmp"
+    if ! {
+        if grep -qF "$ANCHOR" "$CONFIG_FILE"; then
+            while IFS= read -r line; do
+                printf '%s\n' "$line"
+                if [ "$line" = "$ANCHOR" ]; then
+                    printf 'NFQWS2_OPT="\n'
+                    printf '%s\n' "$NFQWS2_BLOCK"
+                    printf '"\n'
+                fi
+            done < "$CONFIG_FILE"
+        else
+            cat "$CONFIG_FILE"
+            printf '\n# Generated from UCI config\n'
+            printf 'NFQWS2_OPT="\n'
+            printf '%s\n' "$NFQWS2_BLOCK"
+            printf '"\n'
+        fi
+    } > "$TMPCONF"; then
+        echo "Error: cannot write temporary config: $TMPCONF"
+        exit 1
+    fi
+    mv "$TMPCONF" "$CONFIG_FILE" || exit 1
+}
+
+# Script activation is controlled by custom.d and custom.d/disabled.
+# Remove obsolete per-script variables, retaining only the global switches.
+sed -i '/^DISABLE_[A-Z_]*=.*$/{ /^DISABLE_CUSTOM/!{ /^DISABLE_IPV6/!d; }; }' "$CONFIG_FILE"
+
+[ -s "$CONFIG_FILE" ] || {
+    echo "Error: generated config is empty"
+    exit 1
+}
+/bin/sh -n "$CONFIG_FILE" || {
+    echo "Error: generated config has invalid shell syntax"
+    exit 1
+}
+[ "$CHECK_ONLY" = "0" ] || {
+    echo "Config check passed: $TARGET_CONFIG_FILE"
+    exit 0
+}
+mv "$CONFIG_FILE" "$TARGET_CONFIG_FILE" || {
+    echo "Error: cannot replace config: $TARGET_CONFIG_FILE"
+    exit 1
+}
+CONFIG_FILE=""
+trap - 0 1 2 15
+
+echo "Config updated: $TARGET_CONFIG_FILE"
+echo "Strategies: $STRATEGY_COUNT"

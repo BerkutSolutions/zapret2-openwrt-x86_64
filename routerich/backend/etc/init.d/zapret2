@@ -1,0 +1,449 @@
+#!/bin/sh /etc/rc.common
+# zapret2 init script for OpenWrt
+
+USE_PROCD=1
+START=99
+STOP=10
+
+ZAPRET_BASE=/opt/zapret2
+ZAPRET_RW=${ZAPRET_RW:-"$ZAPRET_BASE"}
+ZAPRET_CONFIG=${ZAPRET_CONFIG:-"$ZAPRET_RW/config"}
+CUSTOM_DIR="$ZAPRET_RW/init.d/openwrt"
+UCI2CONFIG="$ZAPRET_BASE/init.d/openwrt/uci2config"
+CONFIG_ERROR_FILE=/tmp/zapret2/config-error
+ZAPRET2_BIN=/usr/bin/zapret2
+PIDDIR=/var/run
+
+my_extra_command() {
+	local cmd="$1"
+	local help="$2"
+
+	local extra="$(printf "%-16s%s" "${cmd}" "${help}")"
+	EXTRA_HELP="${EXTRA_HELP}	${extra}
+"
+	EXTRA_COMMANDS="${EXTRA_COMMANDS} ${cmd}"
+}
+
+my_extra_command stop_fw "Stop zapret firewall (noop in iptables+fw3 case)"
+my_extra_command start_fw "Start zapret firewall (noop in iptables+fw3 case)"
+my_extra_command restart_fw "Restart zapret firewall (noop in iptables+fw3 case)"
+my_extra_command reload_ifsets "Reload interface lists (nftables only)"
+my_extra_command list_ifsets "Display interface lists (nftables only)"
+my_extra_command list_table "Display zapret nftable (nftables only)"
+my_extra_command stop_daemons "Stop zapret daemons only (=stop in iptables+fw3 case)"
+my_extra_command start_daemons "Start zapret daemons only (=start in iptables+fw3 case)"
+my_extra_command restart_daemons "Restart zapret daemons only (=restart in iptables+fw3 case)"
+
+parent_pid() {
+	[ -r "/proc/$1/stat" ] || return 1
+	awk '{print $4}' "/proc/$1/stat" 2>/dev/null
+}
+
+called_from_procd() {
+	local pid="$PPID"
+	local depth=0
+	local comm=
+
+	while [ -n "$pid" ] && [ "$depth" -lt 4 ]; do
+		case "$pid" in
+			''|*[!0-9]*) break ;;
+		esac
+		[ "$pid" -gt 1 ] || break
+
+		if [ -r "/proc/$pid/comm" ]; then
+			IFS= read -r comm < "/proc/$pid/comm" || comm=
+			case "$comm" in
+				procd|ujail)
+					return 0
+					;;
+			esac
+		fi
+
+		pid="$(parent_pid "$pid")" || break
+		depth=$((depth + 1))
+	done
+
+	return 1
+}
+
+called_from_package_manager() {
+	local pid="$PPID"
+	local depth=0
+	local comm=
+
+	[ "${PKG_UPGRADE:-0}" = "1" ] && return 0
+
+	while [ -n "$pid" ] && [ "$depth" -lt 6 ]; do
+		case "$pid" in
+			''|*[!0-9]*) break ;;
+		esac
+		[ "$pid" -gt 1 ] || break
+
+		if [ -r "/proc/$pid/comm" ]; then
+			IFS= read -r comm < "/proc/$pid/comm" || comm=
+			case "$comm" in
+				apk|opkg)
+					return 0
+					;;
+			esac
+		fi
+
+		pid="$(parent_pid "$pid")" || break
+		depth=$((depth + 1))
+	done
+
+	return 1
+}
+
+run_service_action() {
+	# Package frontends may close their output pipe after truncating long commands.
+	if called_from_package_manager; then
+		"$@" >/dev/null 2>&1
+	else
+		"$@"
+	fi
+}
+
+apply_patches() {
+	[ -x "$ZAPRET2_BIN" ] || return 1
+	"$ZAPRET2_BIN" patch-apply >/dev/null 2>&1
+}
+
+revert_patches() {
+	[ -x "$ZAPRET2_BIN" ] || return 1
+	"$ZAPRET2_BIN" patch-revert >/dev/null 2>&1
+}
+
+help() {
+	[ -t 1 ] || {
+		called_from_procd && return 0
+	}
+
+	cat <<EOF
+Syntax: $initscript [command]
+
+Available commands:
+EOF
+	echo -e "$ALL_HELP"
+}
+
+run_config_generator() {
+	local output rc
+
+	if [ ! -x "$UCI2CONFIG" ]; then
+		output="Config generator is not executable: $UCI2CONFIG"
+		rc=1
+	else
+		output="$("$UCI2CONFIG" "$@" 2>&1)"
+		rc=$?
+	fi
+
+	[ -z "$output" ] || printf '%s\n' "$output"
+	if [ "$rc" -ne 0 ]; then
+		mkdir -p "$(dirname "$CONFIG_ERROR_FILE")"
+		printf '%s\n' "${output:-Config generation failed}" > "$CONFIG_ERROR_FILE"
+		chmod 644 "$CONFIG_ERROR_FILE" 2>/dev/null
+		return "$rc"
+	fi
+
+	rm -f "$CONFIG_ERROR_FILE"
+	return 0
+}
+
+generate_config() {
+	run_config_generator
+}
+
+check_config() {
+	run_config_generator --check
+}
+
+fix_ipset_permissions() {
+	local dir="$ZAPRET_RW/ipset"
+	local f
+
+	[ -d "$dir" ] || return 0
+	chmod 755 "$dir" || return 1
+
+	for f in "$dir"/*.txt*; do
+		[ -f "$f" ] || continue
+		chmod 644 "$f" || return 1
+	done
+
+	return 0
+}
+
+fix_lua_permissions() {
+	local dir="$ZAPRET_BASE/lua"
+	local f
+
+	[ -d "$dir" ] || return 0
+	chmod 755 "$dir" || return 1
+
+	for f in "$dir"/*.lua*; do
+		[ -f "$f" ] || continue
+		chmod 644 "$f" || return 1
+	done
+
+	return 0
+}
+
+fix_log_permissions() {
+	[ -d /tmp/zapret2 ] && chmod 755 /tmp/zapret2
+	for f in /tmp/zapret2/*.log; do
+		[ -f "$f" ] && chmod 644 "$f"
+	done
+
+	return 0
+}
+
+cleanup_log_files() {
+	for f in /tmp/zapret2/*.log; do
+		[ -f "$f" ] || continue
+		case "${f##*/}" in
+			finder.log|finder-results.log|blockcheck2.log) continue ;;
+		esac
+		rm -f "$f"
+	done
+
+	return 0
+}
+
+load_runtime_context() {
+	local script exedir
+
+	script=$(readlink /etc/init.d/zapret2)
+	if [ -n "$script" ]; then
+		exedir=$(dirname "$script")
+		ZAPRET_BASE=$(readlink -f "$exedir/../..")
+	else
+		ZAPRET_BASE=/opt/zapret2
+	fi
+
+	ZAPRET_RW=${ZAPRET_RW:-"$ZAPRET_BASE"}
+	ZAPRET_CONFIG=${ZAPRET_CONFIG:-"$ZAPRET_RW/config"}
+	CUSTOM_DIR="$ZAPRET_RW/init.d/openwrt"
+
+	. "$ZAPRET_BASE/init.d/openwrt/functions"
+	# The init file is loaded before its embedded startup patch is applied.
+	: "${INIT_APPLY_FW:=1}"
+
+	custom_runner() {
+		# $1 - function name
+		# $2+ - params
+
+		[ "$DISABLE_CUSTOM" = 1 ] && return 0
+
+		local n script FUNC=$1
+
+		shift
+
+		[ -d "$CUSTOM_DIR/custom.d" ] && {
+			dir_is_not_empty "$CUSTOM_DIR/custom.d" && {
+				for script in "$CUSTOM_DIR/custom.d/"*; do
+					[ -f "$script" ] || continue
+
+					DAEMON_CFGNAME_SAVED="$DAEMON_CFGNAME"
+					unset DAEMON_CFGNAME
+
+					unset -f $FUNC
+					. "$script"
+
+					if [ -z "$DAEMON_CFGNAME" ]; then
+						DAEMON_CFGNAME="$(basename "$script")"
+						DAEMON_CFGNAME="${DAEMON_CFGNAME%%.*}"
+					fi
+
+					existf $FUNC && $FUNC "$@"
+
+					DAEMON_CFGNAME="$DAEMON_CFGNAME_SAVED"
+				done
+			}
+		}
+	}
+
+	USEROPT="--user=$WS_USER"
+	NFQWS2="${NFQWS2:-$ZAPRET_BASE/nfq2/nfqws2}"
+	LUAOPT="--lua-init=@$ZAPRET_BASE/lua/zapret-lib.lua --lua-init=@$ZAPRET_BASE/lua/zapret-antidpi.lua --lua-init=@$ZAPRET_BASE/lua/zapret-auto.lua"
+	NFQWS2_OPT_BASE="$USEROPT --fwmark=$DESYNC_MARK $LUAOPT"
+
+	DAEMON_CFGNAME=main
+
+	run_daemon() {
+		# $1 - daemon string id or number. can use 1,2,3,...
+		# $2 - daemon
+		# $3 - daemon args
+		# use $PIDDIR/$DAEMONBASE$1.pid as pidfile
+		local DAEMONBASE="$(basename "$2")"
+		local DAEMON_NAME="$DAEMONBASE"
+		local DAEMON_IDNUM=$1
+		local DAEMON_PATH="$2"
+		local DAEMON_ARGS="$3"
+		local DAEMON_LOG=
+
+		echo "Starting daemon $1: $2 $3"
+
+		if [ -n "$DAEMON_LOG_FILE" ]; then
+			DAEMON_LOG="$DAEMON_LOG_FILE"
+			DAEMON_LOG="${DAEMON_LOG//<DAEMON_NAME>/$DAEMON_NAME}"
+			DAEMON_LOG="${DAEMON_LOG//<DAEMON_IDNUM>/$DAEMON_IDNUM}"
+			DAEMON_LOG="${DAEMON_LOG//<DAEMON_CFGNAME>/$DAEMON_CFGNAME}"
+
+			mkdir -p "$(dirname "$DAEMON_LOG")"
+			[ -f "$DAEMON_LOG" ] && rm -f "$DAEMON_LOG"
+
+			if [ "$DAEMON_LOG_ENABLE" = "1" ]; then
+				DAEMON_ARGS="--debug=@$DAEMON_LOG $DAEMON_ARGS"
+			fi
+		fi
+
+		procd_open_instance
+		procd_set_param command $DAEMON_PATH $DAEMON_ARGS
+		procd_set_param pidfile $PIDDIR/${DAEMONBASE}_$1.pid
+		procd_close_instance
+	}
+
+	run_nfqws() {
+		run_daemon $1 "$NFQWS2" "$NFQWS2_OPT_BASE $2"
+	}
+
+	do_nfqws() {
+		[ "$1" = 0 ] || { shift; run_nfqws "$@"; }
+	}
+}
+
+refresh_runtime_context() {
+	fix_ipset_permissions || return 1
+	fix_lua_permissions || return 1
+	generate_config || return 1
+	load_runtime_context
+}
+
+start_daemons_procd() {
+	standard_mode_daemons 1
+	custom_runner zapret_custom_daemons 1
+
+	return 0
+}
+
+start_daemons() {
+	refresh_runtime_context || return 1
+	rc_procd start_daemons_procd "$@" || return 1
+	fix_log_permissions
+}
+
+stop_daemons() {
+	local svc="$(basename ${basescript:-$initscript})"
+	procd_running "$svc" "$1" && procd_kill "$svc" "$1"
+}
+
+restart_daemons() {
+	stop_daemons
+	start_daemons
+}
+
+start_fw() {
+	refresh_runtime_context || return 1
+	zapret_apply_firewall
+}
+
+stop_fw() {
+	load_runtime_context
+	zapret_unapply_firewall
+}
+
+restart_fw() {
+	stop_fw
+	start_fw
+}
+
+reload_ifsets() {
+	refresh_runtime_context || return 1
+	zapret_reload_ifsets
+}
+
+list_ifsets() {
+	refresh_runtime_context || return 1
+	zapret_list_ifsets
+}
+
+list_table() {
+	refresh_runtime_context || return 1
+	zapret_list_table
+}
+
+start_service_impl() {
+	refresh_runtime_context || return 1
+	start_daemons_procd || return 1
+
+	[ "${INIT_APPLY_FW:-1}" != "1" ] || {
+		linux_fwtype
+		openwrt_fw3_integration || zapret_apply_firewall
+	}
+}
+
+start_service() {
+	local rc
+
+	logger -t zapret2 "Starting zapret2..."
+	if ! apply_patches; then
+		revert_patches
+		return 1
+	fi
+	run_service_action start_service_impl
+	rc=$?
+	[ "$rc" -eq 0 ] || revert_patches
+	return "$rc"
+}
+
+stop_service_impl() {
+	load_runtime_context
+
+	[ "${INIT_APPLY_FW:-1}" != "1" ] || {
+		linux_fwtype
+		openwrt_fw3_integration || zapret_unapply_firewall
+	}
+}
+
+stop_service() {
+	local rc
+
+	logger -t zapret2 "Stopping zapret2..."
+	run_service_action stop_service_impl
+	rc=$?
+	if ! revert_patches; then
+		[ "$rc" -ne 0 ] || rc=1
+	fi
+	return "$rc"
+}
+
+reload_service() {
+	local svc="$(basename ${basescript:-$initscript})"
+
+	# Validate without replacing the config used by the running service.
+	check_config || return 1
+	stop_service
+	procd_kill "$svc"
+	cleanup_log_files
+	sleep 1
+	rc_procd start_service || return 1
+	fix_log_permissions
+}
+
+service_triggers() {
+	procd_add_reload_trigger "zapret2"
+}
+
+service_started() {
+	fix_log_permissions
+}
+
+service_stopped() {
+	cleanup_log_files
+}
+
+boot() {
+	# /opt may become executable only after overlay/persistent mounts settle.
+	# Wait for the generator instead of racing procd during early boot.
+	( i=0; while [ "$i" -lt 30 ] && [ ! -x "$UCI2CONFIG" ]; do sleep 1; i=$((i + 1)); done; [ -x "$UCI2CONFIG" ] || exit 0; i=0; while [ "$i" -lt 5 ]; do start && exit 0; sleep 3; i=$((i + 1)); done ) &
+}

@@ -1,0 +1,18 @@
+Via Libre / Zapret2 OpenWrt x86_64
+
+Original packaging and OpenWrt x86_64 integration:
+Copyright (c) 2026 Berkut Solutions.
+
+Upstream Zapret2:
+Copyright (c) 2016-2026 bol-van.
+Licensed under the MIT License. The original notice is retained in the
+upstream source tree under upstream/official and upstream/openwrt-embedded.
+Project: https://github.com/bol-van/zapret2
+
+Routerich LuCI/backend integration:
+Included with permission from Routerich Support for this x86_64 port.
+Project: https://github.com/routerich
+These files are not relicensed as Berkut Solutions code; preserve this notice
+and the project attribution when redistributing them.
+
+Other third-party terms are listed in THIRD_PARTY_NOTICES.md.
