@@ -57,6 +57,8 @@ is_current() {
   apk info -e zapret2 >/dev/null 2>&1 || return 1
   apk info -e zapret2-uci >/dev/null 2>&1 || return 1
   apk info -e luci-app-zapret2 >/dev/null 2>&1 || return 1
+  [ -x /etc/init.d/zapret2 ] || return 1
+  [ -f /opt/zapret2/blockcheck2.sh ] || return 1
   installed=$(apk list --installed zapret2 2>/dev/null | awk 'NR == 1 { sub(/^zapret2-/, "", $1); print $1 }')
   case "$installed" in
     "$version"*) return 0 ;;

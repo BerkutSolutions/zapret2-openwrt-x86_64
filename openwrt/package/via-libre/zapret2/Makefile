@@ -23,6 +23,7 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)/nfq2 $(PKG_BUILD_DIR)/mdig $(PKG_BUILD_DIR)/ip2net
 	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/common $(PKG_BUILD_DIR)/
 	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/blockcheck2.d $(PKG_BUILD_DIR)/
+	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/blockcheck2.sh $(PKG_BUILD_DIR)/
 	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/files $(PKG_BUILD_DIR)/
 	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/ipset $(PKG_BUILD_DIR)/
 	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/lua $(PKG_BUILD_DIR)/
@@ -42,13 +43,17 @@ endef
 
 define Package/zapret2/install
 	$(INSTALL_DIR) $(1)/opt/zapret2/nfq2 $(1)/opt/zapret2/mdig $(1)/opt/zapret2/ip2net
+	$(INSTALL_DIR) $(1)/opt/zapret2
 	$(INSTALL_DIR) $(1)/opt/zapret2/init.d/openwrt
+	$(INSTALL_DIR) $(1)/etc/init.d
 	$(CP) $(PKG_BUILD_DIR)/common $(1)/opt/zapret2/
 	$(CP) $(PKG_BUILD_DIR)/blockcheck2.d $(1)/opt/zapret2/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/blockcheck2.sh $(1)/opt/zapret2/blockcheck2.sh
 	$(CP) $(PKG_BUILD_DIR)/files $(1)/opt/zapret2/
 	$(CP) $(PKG_BUILD_DIR)/ipset $(1)/opt/zapret2/
 	$(CP) $(PKG_BUILD_DIR)/lua $(1)/opt/zapret2/
 	$(CP) $(PKG_BUILD_DIR)/init.d/* $(1)/opt/zapret2/init.d/openwrt/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/init.d/zapret2 $(1)/etc/init.d/zapret2
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/config.default $(1)/opt/zapret2/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/nfq2/nfqws2 $(1)/opt/zapret2/nfq2/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/mdig/mdig $(1)/opt/zapret2/mdig/
@@ -57,6 +62,7 @@ define Package/zapret2/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/zapret2-testctl $(1)/usr/bin/zapret2-testctl
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/zapret2-cli $(1)/usr/bin/zapret2
+	find $(1)/opt/zapret2 -type f -name '*.sh' -exec chmod 755 {} +
 endef
 
 $(eval $(call BuildPackage,zapret2))
