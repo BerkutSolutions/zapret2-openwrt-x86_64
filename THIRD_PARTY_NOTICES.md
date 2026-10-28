@@ -12,7 +12,7 @@ the source and notices remain the responsibility of the deployment package.
 
 Routerich LuCI/backend material is included in the x86_64 port with permission
 from Routerich Support. It is attributed to
-https://github.com/routerich and is not relicensed as Berkut Solutions code.
+https://github.com/routerich and is not relicensed as original packaging code.
 Preserve the attribution and this notice when redistributing it.
 
 The original packaging and OpenWrt x86_64 integration are Apache-2.0. The

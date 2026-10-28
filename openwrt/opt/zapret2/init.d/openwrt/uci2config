@@ -1,5 +1,5 @@
 #!/bin/sh
-# Berkut Router Manager owned UCI compiler for the official zapret2 runtime.
+# Zapret2 package owned UCI compiler for the official zapret2 runtime.
 # This file is an independent adapter; it does not execute UCI-provided shell.
 set -eu
 

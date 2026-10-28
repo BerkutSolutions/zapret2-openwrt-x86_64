@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=zapret2
-PKG_VERSION:=$(VIA_LIBRE_VERSION)
+PKG_VERSION:=$(ZAPRET2_VERSION)
 PKG_RELEASE:=1
 
 include $(INCLUDE_DIR)/package.mk
@@ -21,20 +21,20 @@ endef
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	mkdir -p $(PKG_BUILD_DIR)/nfq2 $(PKG_BUILD_DIR)/mdig $(PKG_BUILD_DIR)/ip2net
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/common $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/blockcheck2.d $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/blockcheck2.sh $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/files $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/ipset $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/lua $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/init.d/openwrt $(PKG_BUILD_DIR)/init.d
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/config.default $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/binaries/linux-x86_64/nfqws2 $(PKG_BUILD_DIR)/nfq2/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/binaries/linux-x86_64/mdig $(PKG_BUILD_DIR)/mdig/
-	$(CP) $(VIA_LIBRE_ROOT)/upstream/openwrt-embedded/zapret2-v$(VIA_LIBRE_VERSION)/binaries/linux-x86_64/ip2net $(PKG_BUILD_DIR)/ip2net/
-	$(CP) $(VIA_LIBRE_ROOT)/port/opt/zapret2/zapret2-finder $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/port/usr/bin/zapret2-testctl $(PKG_BUILD_DIR)/
-	$(CP) $(VIA_LIBRE_ROOT)/port/usr/bin/zapret2 $(PKG_BUILD_DIR)/zapret2-cli
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/common $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/blockcheck2.d $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/blockcheck2.sh $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/files $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/ipset $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/lua $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/init.d/openwrt $(PKG_BUILD_DIR)/init.d
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/config.default $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/binaries/linux-x86_64/nfqws2 $(PKG_BUILD_DIR)/nfq2/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/binaries/linux-x86_64/mdig $(PKG_BUILD_DIR)/mdig/
+	$(CP) $(ZAPRET2_ROOT)/upstream/openwrt-embedded/zapret2-v$(ZAPRET2_VERSION)/binaries/linux-x86_64/ip2net $(PKG_BUILD_DIR)/ip2net/
+	$(CP) $(ZAPRET2_ROOT)/port/opt/zapret2/zapret2-finder $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/port/usr/bin/zapret2-testctl $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/port/usr/bin/zapret2 $(PKG_BUILD_DIR)/zapret2-cli
 endef
 
 define Build/Compile
@@ -55,6 +55,11 @@ define Package/zapret2/install
 	$(CP) $(PKG_BUILD_DIR)/init.d/* $(1)/opt/zapret2/init.d/openwrt/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/init.d/zapret2 $(1)/etc/init.d/zapret2
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/config.default $(1)/opt/zapret2/
+	# The upstream init script sources /opt/zapret2/config even before the
+	# UCI companion package's post-install hook has a chance to run. Ship a
+	# safe disabled initial config in the runtime package so apk post-install
+	# actions never fail with a missing config file.
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/config.default $(1)/opt/zapret2/config
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/nfq2/nfqws2 $(1)/opt/zapret2/nfq2/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/mdig/mdig $(1)/opt/zapret2/mdig/
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/ip2net/ip2net $(1)/opt/zapret2/ip2net/

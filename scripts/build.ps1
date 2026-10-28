@@ -14,6 +14,10 @@ Copy-Item (Join-Path $Root 'upstream\openwrt-embedded\zapret2-v1.0.6\files') (Jo
 Copy-Item (Join-Path $Root 'upstream\openwrt-embedded\zapret2-v1.0.6\init.d\openwrt\*') (Join-Path $Stage 'opt\zapret2\init.d\openwrt') -Recurse -Force
 New-Item -ItemType Directory -Force (Join-Path $Stage 'etc\init.d'), (Join-Path $Stage 'etc\config') | Out-Null
 Copy-Item (Join-Path $Root 'upstream\openwrt-embedded\zapret2-v1.0.6\config.default') (Join-Path $Stage 'opt\zapret2\config.default') -Force
+# The init script sources this file during package post-install.  Keep a safe
+# disabled copy in the standalone archive as well; uci2config will replace it
+# from /etc/config/zapret2 before the service is enabled.
+Copy-Item (Join-Path $Root 'upstream\openwrt-embedded\zapret2-v1.0.6\config.default') (Join-Path $Stage 'opt\zapret2\config') -Force
 Copy-Item (Join-Path $Root 'openwrt\opt\zapret2\init.d\openwrt\uci2config') (Join-Path $Stage 'opt\zapret2\init.d\openwrt\uci2config') -Force
 Copy-Item (Join-Path $Root 'openwrt\etc\config\zapret2') (Join-Path $Stage 'etc\config\zapret2') -Force
 Copy-Item (Join-Path $Root 'upstream\openwrt-embedded\zapret2-v1.0.6\init.d\openwrt\zapret2') (Join-Path $Stage 'etc\init.d\zapret2') -Force

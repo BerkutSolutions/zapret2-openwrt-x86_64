@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-zapret2
-PKG_VERSION:=$(VIA_LIBRE_VERSION)
+PKG_VERSION:=$(ZAPRET2_VERSION)
 PKG_RELEASE:=1
 PKGARCH:=all
 
@@ -17,7 +17,7 @@ endef
 
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
-	$(CP) $(VIA_LIBRE_ROOT)/routerich/luci/. $(PKG_BUILD_DIR)/
+	$(CP) $(ZAPRET2_ROOT)/routerich/luci/. $(PKG_BUILD_DIR)/
 endef
 
 define Build/Compile
